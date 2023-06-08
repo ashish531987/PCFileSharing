@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">PC File Sharing</string>
+    <string name="btn_select_dir">Select Directory To Share</string>
+    <string name="btn_start_sharing">Start Sharing</string>
+    <string name="btn_stop_sharing">Stop Sharing</string>
+    <string name="tv_url_hint1">To Share Your Files With Your PC in Your Private Home Secure WIFI network, </string>
+    <string name="tv_url_hint2">Please Follow the Steps below - </string>
+    <string name="tv_url_hint3">1. You have to first select the directory that you would like to share.</string>
+    <string name="tv_url_hint4">2. Then You have to start the server.</string>
+    <string name="tv_url_hint5">3. Your web URL to share files on your pc will appear below. Access this url from your pc from any browser.</string>
+    <string name="tv_url_place_holder">http://%1$S:%2$d/index</string>
+</resources>
