@@ -291,7 +291,7 @@ class FileSharingServer(
                                         context.applicationContext.contentResolver.openFileDescriptor(documentFile.uri, "r")
                                             ?.use { fd ->
                                                 val bitmap = BitmapFactory.decodeFileDescriptor(fd.fileDescriptor)
-                                                val thumbnail = ThumbnailUtils.extractThumbnail(bitmap, 24, 24)
+                                                val thumbnail = ThumbnailUtils.extractThumbnail(bitmap, 48, 48)
                                                 val baos = ByteArrayOutputStream()
                                                 thumbnail.compress(Bitmap.CompressFormat.JPEG, 100, baos)
                                                 val b = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
