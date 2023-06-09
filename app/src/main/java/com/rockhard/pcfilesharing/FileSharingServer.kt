@@ -1,46 +1,72 @@
 package com.rockhard.pcfilesharing
 
-import android.R
-import android.R.attr.bitmap
 import android.content.Context
 import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
 import android.media.ThumbnailUtils
 import android.net.Uri
-import android.os.Build
 import android.provider.OpenableColumns
 import android.util.Base64
 import android.util.Log
-import androidx.annotation.RequiresApi
-import androidx.core.net.toFile
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
-import com.rockhard.pcfilesharing.MainActivity.Companion.LOG_TAG
-import io.ktor.http.content.*
-import io.ktor.server.application.*
-import io.ktor.server.engine.*
-import io.ktor.server.html.*
-import io.ktor.server.netty.*
-import io.ktor.server.request.*
-import io.ktor.server.response.*
-import io.ktor.server.routing.*
+import io.ktor.http.content.PartData
+import io.ktor.http.content.forEachPart
+import io.ktor.http.content.streamProvider
+import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.call
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.html.respondHtml
+import io.ktor.server.netty.Netty
+import io.ktor.server.request.receiveMultipart
+import io.ktor.server.response.header
+import io.ktor.server.response.respondOutputStream
+import io.ktor.server.response.respondText
+import io.ktor.server.routing.get
+import io.ktor.server.routing.post
+import io.ktor.server.routing.routing
 import io.ktor.util.pipeline.PipelineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.html.*
+import kotlinx.html.FormEncType
+import kotlinx.html.FormMethod
+import kotlinx.html.HTML
+import kotlinx.html.a
+import kotlinx.html.b
+import kotlinx.html.body
+import kotlinx.html.checkBoxInput
+import kotlinx.html.div
+import kotlinx.html.fileInput
+import kotlinx.html.form
+import kotlinx.html.h4
+import kotlinx.html.head
+import kotlinx.html.img
+import kotlinx.html.link
+import kotlinx.html.meta
+import kotlinx.html.onClick
+import kotlinx.html.p
+import kotlinx.html.script
+import kotlinx.html.span
+import kotlinx.html.style
+import kotlinx.html.submitInput
+import kotlinx.html.table
+import kotlinx.html.td
+import kotlinx.html.title
+import kotlinx.html.tr
 import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
 
 
+private const val PATH_PARAM = "path"
+
 class FileSharingServer(
     applicationEngine: Netty = Netty,
     port: Int = 8080,
     context: Context
-    ) {
-    val nettyServer = embeddedServer(applicationEngine, port){
+) {
+    val nettyServer = embeddedServer(applicationEngine, port) {
         routing {
             get("/") {
                 indexPageHandler(context)
@@ -108,43 +134,70 @@ class FileSharingServer(
     private suspend fun PipelineContext<Unit, ApplicationCall>.indexPageHandler(
         context: Context
     ) {
-        var pathParameter = call.request.queryParameters["path"].orEmpty()
-        Log.d(MainActivity.LOG_TAG, "Query parameter is $pathParameter")
+        val pathParameter = call.request.queryParameters[PATH_PARAM].orEmpty()
         if (pathParameter.isNotEmpty()) {
-            // Download file
-            val rootDirs =
-                getRootChildFolder(context, SpUtil.getString(SpUtil.FOLDER_URI, "").toUri())
-            rootDirs?.forEach { fl ->
-                if (fl.name.equals(pathParameter)) {
-                    // Check if its a file or folder
-                    // if file then download that file
-                    // else return list of children folder
-                    if(fl.isFile) {
-                        call.response.header(
-                            "Content-Disposition",
-                            "attachment; filename=\"${fl.name}\""
-                        )
-                        context.applicationContext.contentResolver.openFileDescriptor(fl.uri, "r")
-                            ?.use { fd ->
-                                FileInputStream(fd.fileDescriptor).use {
-                                    withContext(Dispatchers.IO) {
-                                        call.respondOutputStream {
-                                            while (it.available() > 0) {
-                                                write(it.readBytes())
+            Log.d(
+                MainActivity.LOG_TAG,
+                "Query parameter is $pathParameter"
+            )            // Download file
+            DocumentFile.fromTreeUri(context, SpUtil.getString(SpUtil.FOLDER_URI, "").toUri())
+                ?.let {
+                    val pathArray = pathParameter.split("/")
+                    var documentFile = it
+                    var found = false
+                    for (path in pathArray) {
+                        found = false
+                        if (documentFile.name.equals(path)) {
+                            continue
+                        } else {
+                            for (file in documentFile.listFiles()) {
+                                if (file.name.equals(path)) {
+                                    found = true
+                                    documentFile = file
+                                    break
+                                }
+                            }
+                            if (found) continue
+                            else break
+                        }
+                    }
+                    if (found) {
+                        if (documentFile.isFile) {
+                            call.response.header(
+                                "Content-Disposition",
+                                "attachment; filename=\"${documentFile.name}\""
+                            )
+                            context.applicationContext.contentResolver.openFileDescriptor(
+                                documentFile.uri,
+                                "r"
+                            )
+                                ?.use { fd ->
+                                    FileInputStream(fd.fileDescriptor).use {
+                                        withContext(Dispatchers.IO) {
+                                            call.respondOutputStream {
+                                                while (it.available() > 0) {
+                                                    write(it.readBytes())
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            }
-                    } else{
-                        call.respondHtml(block = webPageResponse(context, fl, pathParameter))
+                        } else {
+                            call.respondHtml(
+                                block = webPageResponse(
+                                    context,
+                                    documentFile,
+                                    documentFile.name.toString()
+                                )
+                            )
+                        }
                     }
                 }
-            }
         } else {
-            DocumentFile.fromTreeUri(context, SpUtil.getString(SpUtil.FOLDER_URI, "").toUri())?.let{
-                call.respondHtml(block = webPageResponse(context, it, it.name.toString()))
-            }
+            DocumentFile.fromTreeUri(context, SpUtil.getString(SpUtil.FOLDER_URI, "").toUri())
+                ?.let {
+                    call.respondHtml(block = webPageResponse(context, it, it.name.toString()))
+                }
         }
     }
 
@@ -169,7 +222,7 @@ class FileSharingServer(
             "  text-align: left;\n" +
             "  background-color: #04AA6D;\n" +
             "  color: white;\n" +
-            "}\n"+
+            "}\n" +
             "input[type=button], input[type=submit], input[type=reset] {\n" +
             "  background-color: #1976D2;\n" +
             "  border: none;\n" +
@@ -178,7 +231,7 @@ class FileSharingServer(
             "  text-decoration: none;\n" +
             "  margin: 4px 2px;\n" +
             "  cursor: pointer;\n" +
-            "}\n"+
+            "}\n" +
             "input[type=file]::file-selector-button {\n" +
             "  margin-inline-end: 0;\n" +
             "  padding: 10px 16px;\n" +
@@ -187,40 +240,47 @@ class FileSharingServer(
             "  margin: 4px 2px;\n" +
             "  border: none;\n" +
             "  border-radius: 0;\n" +
-            "}\n"+
+            "}\n" +
             "h4{\n" +
-            "color: #1976D2;\n"+
+            "color: #1976D2;\n" +
             "}\n"
 
     private val scriptHtml =
-            "   function toggleCheckboxes(source) {\n" +
-            "    checkboxes = document.getElementsByName('foo');\n" +
-            "    var i = 0; var n = checkboxes.length;\n"+
-            "    while (i != n) {\n" +
-            "      checkboxes[i].checked = source.checked; i++\n" +
-            "    }\n" +
-            "  }" +
-            "  function downloadAction(source) {\n" +
-            "    checkboxes = document.getElementsByName('foo');\n" +
-            "    var i = 0; var n = checkboxes.length;\n"+
-            "    while (i != n) {\n" +
-            "      if(checkboxes[i].checked) { console.log(checkboxes[i].value);\n" +
-                    "let a= document.createElement('a');\n" +
-                    "a.target= '_blank';\n" +
-                    "a.href= '/?Path='+checkboxes[i].value;\n" +
-                    "a.click();}"+
-            "      i++;\n" +
-            "    }\n" +
-            "  }"
+        "   function toggleCheckboxes(source) {\n" +
+                "    checkboxes = document.getElementsByName('foo');\n" +
+                "    var i = 0; var n = checkboxes.length;\n" +
+                "    while (i != n) {\n" +
+                "      checkboxes[i].checked = source.checked; i++\n" +
+                "    }\n" +
+                "  }" +
+                "  function downloadAction(source) {\n" +
+                "    checkboxes = document.getElementsByName('foo');\n" +
+                "    var i = 0; var n = checkboxes.length;\n" +
+                "    while (i != n) {\n" +
+                "      if(checkboxes[i].checked) { console.log(checkboxes[i].value);\n" +
+                "let a= document.createElement('a');\n" +
+                "a.target= '_blank';\n" +
+                "a.href= '/?Path='+checkboxes[i].value;\n" +
+                "a.click();}" +
+                "      i++;\n" +
+                "    }\n" +
+                "  }"
 
-    private fun webPageResponse(context: Context, parentDirDocument: DocumentFile, pathParameter: String): HTML.() -> Unit = {
+    private fun webPageResponse(
+        context: Context,
+        parentDirDocument: DocumentFile,
+        pathParameter: String
+    ): HTML.() -> Unit = {
         head {
             meta { charset = "utf-8" }
             meta { name = "viewport"; content = "width=device-width, initial-scale=1" }
             title { +"Mobile Remote File Sharing made easy" }
-            link(href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@48,400,0,0", rel="stylesheet")
+            link(
+                href = "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@48,400,0,0",
+                rel = "stylesheet"
+            )
             style { +styleSheet }
-            script{ +scriptHtml }
+            script { +scriptHtml }
         }
         body {
             div {
@@ -252,9 +312,9 @@ class FileSharingServer(
                 }
                 table(classes = "customers") {
                     tr {
-                        td{
-                            checkBoxInput{
-                                onClick="toggleCheckboxes(this)"
+                        td {
+                            checkBoxInput {
+                                onClick = "toggleCheckboxes(this)"
                             }
                         }
                         td {
@@ -274,31 +334,48 @@ class FileSharingServer(
                         }
                     }
                     parentDirDocument.listFiles().forEach { documentFile ->
+                        Log.d(MainActivity.LOG_TAG, "Path is ${documentFile.uri.toString()}")
                         tr {
-                            td{
-                                checkBoxInput{
-                                    name="foo"
-                                    value="${documentFile.name}"
+                            td {
+                                checkBoxInput {
+                                    name = "foo"
+                                    value = "${documentFile.name}"
                                 }
                             }
-                            td{
+                            td {
                                 if (documentFile.isDirectory) {
-                                    span(classes = "material-symbols-outlined"){
+                                    span(classes = "material-symbols-outlined") {
                                         +"folder"
                                     }
                                 } else {
-                                    if(documentFile.name?.endsWith("jpg", ignoreCase = true) == true){
-                                        context.applicationContext.contentResolver.openFileDescriptor(documentFile.uri, "r")
+                                    if (documentFile.name?.endsWith(
+                                            "jpg",
+                                            ignoreCase = true
+                                        ) == true
+                                    ) {
+                                        context.applicationContext.contentResolver.openFileDescriptor(
+                                            documentFile.uri,
+                                            "r"
+                                        )
                                             ?.use { fd ->
-                                                val bitmap = BitmapFactory.decodeFileDescriptor(fd.fileDescriptor)
-                                                val thumbnail = ThumbnailUtils.extractThumbnail(bitmap, 48, 48)
+                                                val bitmap =
+                                                    BitmapFactory.decodeFileDescriptor(fd.fileDescriptor)
+                                                val thumbnail =
+                                                    ThumbnailUtils.extractThumbnail(bitmap, 48, 48)
                                                 val baos = ByteArrayOutputStream()
-                                                thumbnail.compress(Bitmap.CompressFormat.JPEG, 100, baos)
-                                                val b = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
-                                                img(src="data:image/gif;base64,$b")
+                                                thumbnail.compress(
+                                                    Bitmap.CompressFormat.JPEG,
+                                                    100,
+                                                    baos
+                                                )
+                                                val b = Base64.encodeToString(
+                                                    baos.toByteArray(),
+                                                    Base64.DEFAULT
+                                                )
+                                                img(src = "data:image/gif;base64,$b")
                                             }
                                     } else {
-                                        span(classes = "material-symbols-outlined"){
+                                        span(classes = "material-symbols-outlined") {
                                             +"draft"
                                         }
                                     }
@@ -306,14 +383,18 @@ class FileSharingServer(
                             }
                             td {
 //                                if (documentFile.isDirectory) {
-//                                    a(href = "?path=${documentFile.uri.lastPathSegment?.split(":")?.get(1)}", "style") {
+                                a(
+                                    href = "?$PATH_PARAM=${
+                                        documentFile.uri.lastPathSegment?.split(":")?.get(1)
+                                    }", "style"
+                                ) {
+                                    +"${documentFile.name}"
+                                }
+//                                } else {
+//                                a(href = "?$FILE_PATH_PARAM=${documentFile.name}", "style") {
 //                                        +"${documentFile.name}"
 //                                    }
-//                                } else {
-                                a(href = "?path=${documentFile.name}", "style") {
-                                        +"${documentFile.name}"
-//                                    }
-                                }
+//                                }
                             }
                             td {
                                 +"${
@@ -334,6 +415,7 @@ class FileSharingServer(
             }
         }
     }
+
     private fun dumpImageMetaData(context: Context, uri: Uri): String {
 
         val contentResolver = context.contentResolver
@@ -342,7 +424,8 @@ class FileSharingServer(
         // one row. There's no need to filter, sort, or select fields,
         // because we want all fields for one document.
         val cursor: Cursor? = contentResolver.query(
-            uri, null, null, null, null, null)
+            uri, null, null, null, null, null
+        )
 
         cursor?.use {
             // moveToFirst() returns false if the cursor has 0 rows. Very handy for
@@ -353,7 +436,7 @@ class FileSharingServer(
                 // provider-specific, and might not necessarily be the file name.
                 val columnIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 val displayName: String =
-                    it.getString(if(columnIndex > 0) columnIndex else 0)
+                    it.getString(if (columnIndex > 0) columnIndex else 0)
 //                Log.i(LOG_TAG, "Display Name: $displayName")
 
                 val sizeIndex: Int = it.getColumnIndex(OpenableColumns.SIZE)
@@ -366,7 +449,10 @@ class FileSharingServer(
                 val size: String = if (!it.isNull(sizeIndex)) {
                     // Technically the column stores an int, but cursor.getString()
                     // will do the conversion automatically.
-                    android.text.format.Formatter.formatFileSize(context, it.getString(sizeIndex).toLong())
+                    android.text.format.Formatter.formatFileSize(
+                        context,
+                        it.getString(sizeIndex).toLong()
+                    )
                 } else {
                     "Unknown"
                 }
@@ -380,10 +466,12 @@ class FileSharingServer(
     private fun getRootChildFolder(context: Context, dirUri: Uri): List<DocumentFile>? {
         return DocumentFile.fromTreeUri(context.applicationContext, dirUri)?.listFiles()?.toList()
     }
-    public fun start(wait: Boolean){
-        nettyServer.start(wait=wait)
+
+    public fun start(wait: Boolean) {
+        nettyServer.start(wait = wait)
     }
-    public fun stop(gracePeriodMillis: Long){
-        nettyServer.stop(gracePeriodMillis=gracePeriodMillis)
+
+    public fun stop(gracePeriodMillis: Long) {
+        nettyServer.stop(gracePeriodMillis = gracePeriodMillis)
     }
 }
