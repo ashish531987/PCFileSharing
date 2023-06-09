@@ -1,15 +1,21 @@
 package com.rockhard.pcfilesharing
 
+import android.R
+import android.R.attr.bitmap
 import android.content.Context
 import android.database.Cursor
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.media.ThumbnailUtils
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.util.Base64
 import android.util.Log
-import androidx.core.content.FileProvider
+import androidx.annotation.RequiresApi
 import androidx.core.net.toFile
 import androidx.core.net.toUri
-import androidx.core.provider.DocumentsContractCompat
 import androidx.documentfile.provider.DocumentFile
 import com.rockhard.pcfilesharing.MainActivity.Companion.LOG_TAG
 import io.ktor.http.content.*
@@ -24,11 +30,10 @@ import io.ktor.util.pipeline.PipelineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.html.*
-import kotlinx.html.dom.document
-import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.nio.file.Files
+
 
 class FileSharingServer(
     applicationEngine: Netty = Netty,
@@ -207,11 +212,13 @@ class FileSharingServer(
             "      i++;\n" +
             "    }\n" +
             "  }"
+
     private fun webPageResponse(context: Context, parentDirDocument: DocumentFile, pathParameter: String): HTML.() -> Unit = {
         head {
             meta { charset = "utf-8" }
             meta { name = "viewport"; content = "width=device-width, initial-scale=1" }
             title { +"Mobile Remote File Sharing made easy" }
+            link(href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@48,400,0,0", rel="stylesheet")
             style { +styleSheet }
             script{ +scriptHtml }
         }
@@ -252,6 +259,11 @@ class FileSharingServer(
                         }
                         td {
                             h4 {
+                                +"Type"
+                            }
+                        }
+                        td {
+                            h4 {
                                 +"Files/Folders"
                             }
                         }
@@ -262,17 +274,34 @@ class FileSharingServer(
                         }
                     }
                     parentDirDocument.listFiles().forEach { documentFile ->
-                        try {
-                            Log.d(LOG_TAG, "Document ${documentFile.uri.toFile().parentFile?.name}")
-                        } catch (e: Exception){
-                            Log.e(LOG_TAG, e.message.toString())
-                        }
-
                         tr {
                             td{
                                 checkBoxInput{
                                     name="foo"
                                     value="${documentFile.name}"
+                                }
+                            }
+                            td{
+                                if (documentFile.isDirectory) {
+                                    span(classes = "material-symbols-outlined"){
+                                        +"folder"
+                                    }
+                                } else {
+                                    if(documentFile.name?.endsWith("jpg", ignoreCase = true) == true){
+                                        context.applicationContext.contentResolver.openFileDescriptor(documentFile.uri, "r")
+                                            ?.use { fd ->
+                                                val bitmap = BitmapFactory.decodeFileDescriptor(fd.fileDescriptor)
+                                                val thumbnail = ThumbnailUtils.extractThumbnail(bitmap, 24, 24)
+                                                val baos = ByteArrayOutputStream()
+                                                thumbnail.compress(Bitmap.CompressFormat.JPEG, 100, baos)
+                                                val b = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT)
+                                                img(src="data:image/gif;base64,$b")
+                                            }
+                                    } else {
+                                        span(classes = "material-symbols-outlined"){
+                                            +"draft"
+                                        }
+                                    }
                                 }
                             }
                             td {
