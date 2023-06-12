@@ -34,7 +34,6 @@ import kotlinx.html.FormEncType
 import kotlinx.html.FormMethod
 import kotlinx.html.HTML
 import kotlinx.html.a
-import kotlinx.html.b
 import kotlinx.html.body
 import kotlinx.html.checkBoxInput
 import kotlinx.html.div
@@ -61,6 +60,8 @@ import java.io.FileOutputStream
 
 
 private const val PATH_PARAM = "path"
+private const val PAGE_NO_PARAM = "page"
+private const val PAGE_SIZE = 10
 
 class FileSharingServer(
     applicationEngine: Netty = Netty,
@@ -86,15 +87,15 @@ class FileSharingServer(
 
         multipartData.forEachPart { part ->
             part.headers.names().forEach { key ->
-                Log.d(MainActivity.LOG_TAG, "Header key: $key , value : ${part.headers.get(key)}")
+                Log.d(LOG_TAG, "Header key: $key , value : ${part.headers.get(key)}")
             }
             when (part) {
                 is PartData.FormItem -> {
-                    Log.d(MainActivity.LOG_TAG, "Part belongs to Form")
+                    Log.d(LOG_TAG, "Part belongs to Form")
                 }
 
                 is PartData.FileItem -> {
-                    Log.d(MainActivity.LOG_TAG, "Part belongs to File")
+                    Log.d(LOG_TAG, "Part belongs to File")
                     part.contentDisposition?.let { contentDisposition ->
                         fileName = part.originalFileName as String
                         DocumentFile.fromTreeUri(
@@ -125,7 +126,7 @@ class FileSharingServer(
                 }
 
                 else -> {
-                    Log.d(MainActivity.LOG_TAG, "Part doesn't belong to Form or File")
+                    Log.d(LOG_TAG, "Part doesn't belong to Form or File")
                 }
             }
             part.dispose()
@@ -136,10 +137,14 @@ class FileSharingServer(
         context: Context
     ) {
         val pathParameter = call.request.queryParameters[PATH_PARAM].orEmpty()
+        var pageNoParameter = 0
+        call.request.queryParameters[PAGE_NO_PARAM]?.let {
+            pageNoParameter = Integer.parseInt(it)
+        }
         val pathParameterDocumentFiles = ArrayList<DocumentFile>()
         if (pathParameter.isNotEmpty()) {
             Log.d(
-                MainActivity.LOG_TAG,
+                LOG_TAG,
                 "Query parameter is $pathParameter"
             )            // Download file
             DocumentFile.fromTreeUri(context, SpUtil.getString(SpUtil.FOLDER_URI, "").toUri())
@@ -194,7 +199,8 @@ class FileSharingServer(
                                 block = webPageResponse(
                                     context,
                                     documentFile,
-                                    pathParameterDocumentFiles
+                                    pathParameterDocumentFiles,
+                                    pageNoParameter
                                 )
                             )
                         }
@@ -204,7 +210,7 @@ class FileSharingServer(
                                 if(pathParameterDocumentFiles.isEmpty()){
                                     pathParameterDocumentFiles.add(rootTreeDocumentFile)
                                 }
-                                call.respondHtml(block = webPageResponse(context, rootTreeDocumentFile, pathParameterDocumentFiles))
+                                call.respondHtml(block = webPageResponse(context, rootTreeDocumentFile, pathParameterDocumentFiles, pageNoParameter))
                             }
                     }
                 }
@@ -212,7 +218,7 @@ class FileSharingServer(
             DocumentFile.fromTreeUri(context, SpUtil.getString(SpUtil.FOLDER_URI, "").toUri())
                 ?.let {
                     pathParameterDocumentFiles.add(it)
-                    call.respondHtml(block = webPageResponse(context, it, pathParameterDocumentFiles))
+                    call.respondHtml(block = webPageResponse(context, it, pathParameterDocumentFiles, pageNoParameter))
                 }
         }
     }
@@ -285,8 +291,10 @@ class FileSharingServer(
     private fun webPageResponse(
         context: Context,
         parentDirDocument: DocumentFile,
-        pathParameter: ArrayList<DocumentFile>
+        pathParameter: ArrayList<DocumentFile>,
+        _pageNoParameter: Int = 0
     ): HTML.() -> Unit = {
+        var pageNoParameter = _pageNoParameter
         Log.d(LOG_TAG, "Size of DocumentFiles : ${pathParameter.size}")
         head {
             meta { charset = "utf-8" }
@@ -330,6 +338,19 @@ class FileSharingServer(
                     value = "Download"
                     onClick = "downloadAction(this)"
                 }
+                val childrenFiles = parentDirDocument.listFiles()
+                val maxNoOfPages = childrenFiles.size / PAGE_SIZE
+                p {
+                    for (i in 0..maxNoOfPages) {
+                        a(
+                            href = "?$PATH_PARAM=${
+                                parentDirDocument.uri.lastPathSegment?.split(":")?.get(1)
+                            }&$PAGE_NO_PARAM=$i", "style"
+                        ) {
+                            +"$i | "
+                        }
+                    }
+                }
                 table(classes = "customers") {
                     tr {
                         td {
@@ -353,8 +374,16 @@ class FileSharingServer(
                             }
                         }
                     }
-                    parentDirDocument.listFiles().forEach { documentFile ->
-                        Log.d(MainActivity.LOG_TAG, "Path is ${documentFile.uri.toString()}")
+                    val childrenFiles = parentDirDocument.listFiles()
+                    val maxNoOfPages = childrenFiles.size / PAGE_SIZE
+                    if (pageNoParameter > maxNoOfPages) {
+                        pageNoParameter = maxNoOfPages
+                    }
+                    for(i in 0 until PAGE_SIZE){
+                        val index = (pageNoParameter* PAGE_SIZE)+i
+                        if(index == childrenFiles.size) break
+                        val documentFile = childrenFiles[index]
+                        Log.d(LOG_TAG, "Path is ${documentFile.uri}")
                         tr {
                             td {
                                 checkBoxInput {
@@ -402,7 +431,6 @@ class FileSharingServer(
                                 }
                             }
                             td {
-//                                if (documentFile.isDirectory) {
                                 a(
                                     href = "?$PATH_PARAM=${
                                         documentFile.uri.lastPathSegment?.split(":")?.get(1)
@@ -410,24 +438,9 @@ class FileSharingServer(
                                 ) {
                                     +"${documentFile.name}"
                                 }
-//                                } else {
-//                                a(href = "?$FILE_PATH_PARAM=${documentFile.name}", "style") {
-//                                        +"${documentFile.name}"
-//                                    }
-//                                }
                             }
                             td {
-                                +"${
-//                                    context.applicationContext.contentResolver.openFileDescriptor(documentFile.uri, "r")
-//                                        ?.use { fd ->  fd.statSize }
-//                                        ?.let {
-//                                            android.text.format.Formatter.formatFileSize(
-//                                                context.applicationContext,
-//                                                it
-//                                            )
-//                                        }
-                                    dumpImageMetaData(context, documentFile.uri)
-                                }"
+                                +dumpImageMetaData(context, documentFile.uri)
                             }
                         }
                     }
