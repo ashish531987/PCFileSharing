@@ -11,6 +11,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
+import com.rockhard.pcfilesharing.MainActivity.Companion.LOG_TAG
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
 import io.ktor.http.content.streamProvider
@@ -66,7 +67,7 @@ class FileSharingServer(
     port: Int = 8080,
     context: Context
 ) {
-    val nettyServer = embeddedServer(applicationEngine, port) {
+    private val nettyServer = embeddedServer(applicationEngine, port) {
         routing {
             get("/") {
                 indexPageHandler(context)
@@ -135,6 +136,7 @@ class FileSharingServer(
         context: Context
     ) {
         val pathParameter = call.request.queryParameters[PATH_PARAM].orEmpty()
+        val pathParameterDocumentFiles = ArrayList<DocumentFile>()
         if (pathParameter.isNotEmpty()) {
             Log.d(
                 MainActivity.LOG_TAG,
@@ -145,15 +147,20 @@ class FileSharingServer(
                     val pathArray = pathParameter.split("/")
                     var documentFile = it
                     var found = false
+                    var skip = true
                     for (path in pathArray) {
                         found = false
                         if (documentFile.name.equals(path)) {
+                            pathParameterDocumentFiles.add(documentFile)
+                            skip = false
                             continue
-                        } else {
+                        }
+                        if(!skip){
                             for (file in documentFile.listFiles()) {
                                 if (file.name.equals(path)) {
                                     found = true
                                     documentFile = file
+                                    pathParameterDocumentFiles.add(documentFile)
                                     break
                                 }
                             }
@@ -187,16 +194,25 @@ class FileSharingServer(
                                 block = webPageResponse(
                                     context,
                                     documentFile,
-                                    documentFile.name.toString()
+                                    pathParameterDocumentFiles
                                 )
                             )
                         }
+                    } else {
+                        DocumentFile.fromTreeUri(context, SpUtil.getString(SpUtil.FOLDER_URI, "").toUri())
+                            ?.let { rootTreeDocumentFile ->
+                                if(pathParameterDocumentFiles.isEmpty()){
+                                    pathParameterDocumentFiles.add(rootTreeDocumentFile)
+                                }
+                                call.respondHtml(block = webPageResponse(context, rootTreeDocumentFile, pathParameterDocumentFiles))
+                            }
                     }
                 }
         } else {
             DocumentFile.fromTreeUri(context, SpUtil.getString(SpUtil.FOLDER_URI, "").toUri())
                 ?.let {
-                    call.respondHtml(block = webPageResponse(context, it, it.name.toString()))
+                    pathParameterDocumentFiles.add(it)
+                    call.respondHtml(block = webPageResponse(context, it, pathParameterDocumentFiles))
                 }
         }
     }
@@ -269,8 +285,9 @@ class FileSharingServer(
     private fun webPageResponse(
         context: Context,
         parentDirDocument: DocumentFile,
-        pathParameter: String
+        pathParameter: ArrayList<DocumentFile>
     ): HTML.() -> Unit = {
+        Log.d(LOG_TAG, "Size of DocumentFiles : ${pathParameter.size}")
         head {
             meta { charset = "utf-8" }
             meta { name = "viewport"; content = "width=device-width, initial-scale=1" }
@@ -287,11 +304,14 @@ class FileSharingServer(
                 h4 {
                     +"Mobile File Sharing Server"
                 }
-                b {
-                    +"${
-                        SpUtil.getString(SpUtil.FOLDER_URI, "").toUri().lastPathSegment?.split(":")
-                            ?.get(1)
-                    }"
+                for (docFile in pathParameter){
+                    a(
+                        href = "?$PATH_PARAM=${
+                            docFile.uri.lastPathSegment?.split(":")?.get(1)
+                        }", "style"
+                    ) {
+                        +"${docFile.name} / "
+                    }
                 }
                 div {
                     p { +"Click on the \"Choose Files\" button to upload files:" }
